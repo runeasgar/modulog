@@ -85,7 +85,7 @@ function bookmarklet_processor_flag_favorite_process($code = null, $project_name
     $flag = flag_get_flag('favorite');
   	$flag->flag('flag', $nid, $user); 
   	dsm("The module <strong>$project_name</strong> has been added to your favorites.");
-  	drupal_goto('modules/marked-for-review');
+  	drupal_goto('modules/favorites');
   } else {
   	return "There was an error processing your request.";
   }
@@ -100,7 +100,7 @@ function bookmarklet_processor_flag_mark_for_review_process($code = null, $proje
     $flag = flag_get_flag('mark_for_review');
   	$flag->flag('flag', $nid, $user); 
   	dsm("The module <strong>$project_name</strong> has been added to your review list.");
-  	drupal_goto('modules/favorites');
+  	drupal_goto('modules/marked-for-review');
   } else {
   	return "There was an error processing your request.";
   }
@@ -178,7 +178,6 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
     preg_match_all($pattern, $data, $matches);
     if (count($matches[1]) > 0) {
       foreach ($matches[1] as $match) {
-      	dsm($match);
         array_push($module_versions, $match);
         array_push($module_compatibilities, $major_version);
       }
@@ -195,6 +194,7 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
   $node->field_drupal_org_url_token['und'][0]['value'] = $project_name;
   $node->field_compatibility['und'] = array();
   $node->field_install_times['und'][0]['value'] = $module_times_installed;
+  array_unique($module_compatibilities);
   foreach ($module_compatibilities as $module_compatibility) {
     $terms = taxonomy_get_term_by_name($module_compatibility);
     foreach ($terms as $term) {
