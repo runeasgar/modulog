@@ -11,23 +11,70 @@ function bookmarklet_processor_menu() {
     'page callback' => 'bookmarklet_processor_flag_mark_for_review_process',
     'access callback' => TRUE,
   );
+  $items['user/recreate-code'] = array(
+  	'page callback' => 'bookmarklet_processor_user_recreate_code',
+  	'access callback' => 'change own username',
+  );
   return $items;
 }
 
-function bookmarklet_processor_flag_favorite_process($user_code = null, $project_name = null) {
-  $sample_module = node_load(2);
-  dsm($sample_module);
-  bookmarklet_processor_create_module_from_project_name($project_name);
-  print 'user_code: ' . $user_code . '<br />project_name: ' . $project_name;
-  return 'The module $project_name has been added to your favorites';
+// Generate unique bookmarklet code
+function bookmarklet_processor_generate_bookmarklet_code() {
+	global $user;
+	$code = sha1(uniqid());
+	// Must be unique
+	// The likelihood of this happending is absurdly low, but it needs to be done.
+	$user_object = user_load($user->uid);
+	$user_object->field_bookmarklet_code['und'][0]['value'] = bookmarklet_processor_generate_bookmarklet_code();
+	user_save($user_object);
+	return $code;
 }
 
-function bookmarklet_processor_flag_mark_for_review_process($user_code = null, $url = null) {
-  
+// Sets up the user's unique bookmarklet code
+function bookmarklet_processor_user_insert(&$edit, $account, $category) {
+	$code = bookmarklet_processor_generate_bookmarklet_code();
+	dsm("Your bookmarklet code has been generated, and the bookmarklet is below.<br />
+		$code");
+}
+
+// Allows user to recreate their unique code, in the event of abuse
+function bookmarklet_processor_user_recreate_code() {
+	$new_code = bookmarklet_processor_generate_bookmarklet_code();
+	dsm("Your new bookmarklet code has been generated, and the new bookmarklet is below.<br />
+		$new_code");
+}
+
+// Request to add a module to a user's favorites
+function bookmarklet_processor_flag_favorite_process($user_code = null, $project_name = null) {
+  bookmarklet_processor_module_node_exists($project_name);
+  return "The module <strong>$project_name</strong> has been added to your favorites.";
+}
+
+// Request to add a module to a user's review list
+function bookmarklet_processor_flag_mark_for_review_process($user_code = null, $project_name = null) {
+  bookmarklet_processor_module_node_exists($project_name);
+  return "The module <strong>$project_name</strong> has been added to your review list.";
+}
+
+// Check for the module node and create it if it doesn't exist
+function bookmarklet_processor_module_node_exists($project_name) {
+	$query = "SELECT * FROM `field_data_field_drupal_org_url_token` WHERE `field_drupal_org_url_token_value` = '$project_name'";
+	$result = db_select('field_data_field_drupal_org_url_token')
+     				->fields('field_data_field_drupal_org_url_token')
+     				->condition('field_drupal_org_url_token_value',$project_name,'=')
+     				->execute()
+     				->fetchAssoc();
+  if (empty($result['field_drupal_org_url_token_value'])) {
+  	bookmarklet_processor_create_module_from_project_name($project_name);
+  }
 }
 
 function bookmarklet_processor_create_module_from_project_name($project_name) {
+	
+
   $url = 'http://www.drupal.org/project/' . $project_name;
+  // Overriding for development reasons
+  //$url = 'http://localhost:8082/views.html';
   $ch = curl_init(); 
   curl_setopt($ch, CURLOPT_URL, $url); 
   curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
@@ -35,12 +82,12 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
   // These options are required to prevent drupal.org anti-scraping security methods
   curl_setopt($ch, CURLOPT_FOLLOWLOCATION,true);
   curl_setopt($ch, CURLOPT_USERAGENT,'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.8.1.13) Gecko/20080311 Firefox/2.0.0.13');  
-  curl_setopt($ch, CURLOPT_REFERER,'https://www.google.com/search?q=views&aq=f&sourceid=chrome&ie=UTF-8');
+  curl_setopt($ch, CURLOPT_REFERER,'https://www.google.com/search?q=views&aq=f&sourceid=firefox&ie=UTF-8');
+  curl_setopt($ch, CURLOPT_FRESH_CONNECT,true);
 
   // Execute the curl command
   $data = curl_exec($ch);
 
-  if (strlen($data) > 0) { dsm('successfully got the data'); }
   curl_close($ch);
 
   // Acquire the module title
@@ -59,12 +106,12 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
   $major_versions = array(6,7,8);
   $module_versions = array();
   $module_compatibilities = array();
-  dsm($module_title);
   foreach ($major_versions as $major_version) {
-    $pattern = '/<a href="\/node\/\d+">(' . $major_version . '\.x-\d\.\d[-a-z]*?)<\/a>/';
+    $pattern = '/<a href="\/node\/\d+">(' . $major_version . '\.x-\d\.[\d|x]+[-a-z]*?)<\/a>/';
     preg_match_all($pattern, $data, $matches);
     if (count($matches[1]) > 0) {
       foreach ($matches[1] as $match) {
+      	dsm($match);
         array_push($module_versions, $match);
         array_push($module_compatibilities, $major_version);
       }
@@ -72,7 +119,7 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
   }
   $matches = array();
   
-  // Generate the new module
+  // Generate the new module using the acquired information
   $node = new stdClass();
   $node->type = 'module';
   node_object_prepare($node);
@@ -80,14 +127,16 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
   $node->language = LANGUAGE_NONE;
   $node->field_drupal_org_url_token['und'][0]['value'] = $project_name;
   $node->field_compatibility['und'] = array();
+  $node->field_install_times['und'][0]['value'] = $module_times_installed;
   foreach ($module_compatibilities as $module_compatibility) {
-    $term = taxonomy_get_term_by_name($module_compatibility);
-    array_push($node->field_compatibility['und'], array('tid' => $term->tid));
+    $terms = taxonomy_get_term_by_name($module_compatibility);
+    foreach ($terms as $term) {
+      array_push($node->field_compatibility['und'], array('tid' => $term->tid));
+    }
   }
-  $node->field_versions['und'][0] = '';
+  $node->field_versions['und'][0]['value'] = '';
   foreach ($module_versions as $module_version) {
     $node->field_versions['und'][0]['value'] .= "$module_version,";
   }
-  dsm($node);
   node_save($node);
 }
