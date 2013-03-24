@@ -15,9 +15,11 @@ function bookmarklet_processor_menu() {
 }
 
 function bookmarklet_processor_flag_favorite_process($user_code = null, $project_name = null) {
+  $sample_module = node_load(2);
+  dsm($sample_module);
   bookmarklet_processor_create_module_from_project_name($project_name);
   print 'user_code: ' . $user_code . '<br />project_name: ' . $project_name;
-  return null;
+  return 'The module $project_name has been added to your favorites';
 }
 
 function bookmarklet_processor_flag_mark_for_review_process($user_code = null, $url = null) {
@@ -33,28 +35,31 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
   // These options are required to prevent drupal.org anti-scraping security methods
   curl_setopt($ch, CURLOPT_FOLLOWLOCATION,true);
   curl_setopt($ch, CURLOPT_USERAGENT,'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.8.1.13) Gecko/20080311 Firefox/2.0.0.13');  
-  curl_setopt($ch, CURLOPT_REFERER,'http://www.google.com');
+  curl_setopt($ch, CURLOPT_REFERER,'https://www.google.com/search?q=views&aq=f&sourceid=chrome&ie=UTF-8');
 
   // Execute the curl command
-  $data = curl_exec($ch); 
+  $data = curl_exec($ch);
+
+  if (strlen($data) > 0) { dsm('successfully got the data'); }
   curl_close($ch);
 
   // Acquire the module title
-  $pattern = '/<h1 id="page-subtitle">(.*?)<\/h1>/';
+  $pattern = '/>(.*?)<\/h1>/';
   preg_match_all($pattern, $data, $matches);
   $module_title = $matches[1][0];
-  $matches = null;
+  $matches = array();
 
   // Acquire the module number of times installed
   $pattern = '/<li>Reported installs: <strong>(.*?)<\/strong>/';
   preg_match_all($pattern, $data, $matches);
   $module_times_installed = $matches[1][0];
-  $matches = null;
+  $matches = array();
 
   // Determine if the module is compatible with various versions, and record known versions
   $major_versions = array(6,7,8);
   $module_versions = array();
   $module_compatibilities = array();
+  dsm($module_title);
   foreach ($major_versions as $major_version) {
     $pattern = '/<a href="\/node\/\d+">(' . $major_version . '\.x-\d\.\d[-a-z]*?)<\/a>/';
     preg_match_all($pattern, $data, $matches);
@@ -65,12 +70,24 @@ function bookmarklet_processor_create_module_from_project_name($project_name) {
       }
     }
   }
-  $matches = null;
-
-  print $module_title . ' ' . $module_times_installed . '<br />';
-  print 'module versions: ';
-  print_r($module_versions);
-  print '<br />module compatibilities: ';
-  print_r($module_compatibilities);
-  print '<br />';
+  $matches = array();
+  
+  // Generate the new module
+  $node = new stdClass();
+  $node->type = 'module';
+  node_object_prepare($node);
+  $node->title = $module_title;
+  $node->language = LANGUAGE_NONE;
+  $node->field_drupal_org_url_token['und'][0]['value'] = $project_name;
+  $node->field_compatibility['und'] = array();
+  foreach ($module_compatibilities as $module_compatibility) {
+    $term = taxonomy_get_term_by_name($module_compatibility);
+    array_push($node->field_compatibility['und'], array('tid' => $term->tid));
+  }
+  $node->field_versions['und'][0] = '';
+  foreach ($module_versions as $module_version) {
+    $node->field_versions['und'][0]['value'] .= "$module_version,";
+  }
+  dsm($node);
+  node_save($node);
 }
