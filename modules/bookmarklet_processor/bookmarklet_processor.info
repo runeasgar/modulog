@@ -1,0 +1,3 @@
+name = Bookmarklet Processor
+description = Custom module for Modulog site. Processes ajax flag requests initiated from bookmarklets while on another site.
+core = 7.x

@@ -1,0 +1,76 @@
+<?php
+
+// Establishes accepted URL paths for the bookmarklets
+function bookmarklet_processor_menu() {
+  $items['flag/favorite/%/%'] = array(
+    'page callback' => 'bookmarklet_processor_flag_favorite_process',
+    'access callback' => TRUE,
+    'page arguments' => array(2,7),
+  );
+  $items['flag/mark-for-review'] = array(
+    'page callback' => 'bookmarklet_processor_flag_mark_for_review_process',
+    'access callback' => TRUE,
+  );
+  return $items;
+}
+
+function bookmarklet_processor_flag_favorite_process($user_code = null, $project_name = null) {
+  bookmarklet_processor_create_module_from_project_name($project_name);
+  print 'user_code: ' . $user_code . '<br />project_name: ' . $project_name;
+  return null;
+}
+
+function bookmarklet_processor_flag_mark_for_review_process($user_code = null, $url = null) {
+  
+}
+
+function bookmarklet_processor_create_module_from_project_name($project_name) {
+  $url = 'http://www.drupal.org/project/' . $project_name;
+  $ch = curl_init(); 
+  curl_setopt($ch, CURLOPT_URL, $url); 
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1); 
+
+  // These options are required to prevent drupal.org anti-scraping security methods
+  curl_setopt($ch, CURLOPT_FOLLOWLOCATION,true);
+  curl_setopt($ch, CURLOPT_USERAGENT,'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.8.1.13) Gecko/20080311 Firefox/2.0.0.13');  
+  curl_setopt($ch, CURLOPT_REFERER,'http://www.google.com');
+
+  // Execute the curl command
+  $data = curl_exec($ch); 
+  curl_close($ch);
+
+  // Acquire the module title
+  $pattern = '/<h1 id="page-subtitle">(.*?)<\/h1>/';
+  preg_match_all($pattern, $data, $matches);
+  $module_title = $matches[1][0];
+  $matches = null;
+
+  // Acquire the module number of times installed
+  $pattern = '/<li>Reported installs: <strong>(.*?)<\/strong>/';
+  preg_match_all($pattern, $data, $matches);
+  $module_times_installed = $matches[1][0];
+  $matches = null;
+
+  // Determine if the module is compatible with various versions, and record known versions
+  $major_versions = array(6,7,8);
+  $module_versions = array();
+  $module_compatibilities = array();
+  foreach ($major_versions as $major_version) {
+    $pattern = '/<a href="\/node\/\d+">(' . $major_version . '\.x-\d\.\d[-a-z]*?)<\/a>/';
+    preg_match_all($pattern, $data, $matches);
+    if (count($matches[1]) > 0) {
+      foreach ($matches[1] as $match) {
+        array_push($module_versions, $match);
+        array_push($module_compatibilities, $major_version);
+      }
+    }
+  }
+  $matches = null;
+
+  print $module_title . ' ' . $module_times_installed . '<br />';
+  print 'module versions: ';
+  print_r($module_versions);
+  print '<br />module compatibilities: ';
+  print_r($module_compatibilities);
+  print '<br />';
+}
