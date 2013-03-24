@@ -7,13 +7,14 @@ function bookmarklet_processor_menu() {
     'access callback' => TRUE,
     'page arguments' => array(2,7),
   );
-  $items['flag/mark-for-review'] = array(
+  $items['flag/mark-for-review/%/%'] = array(
     'page callback' => 'bookmarklet_processor_flag_mark_for_review_process',
     'access callback' => TRUE,
+    'page arguments' => array(2,7),
   );
   $items['user/recreate-code'] = array(
   	'page callback' => 'bookmarklet_processor_user_recreate_code',
-  	'access callback' => 'change own username',
+  	'access callback' => TRUE,
   );
   return $items;
 }
@@ -25,7 +26,7 @@ function bookmarklet_processor_generate_bookmarklet_code() {
 	// Must be unique
 	// The likelihood of this happending is absurdly low, but it needs to be done.
 	$user_object = user_load($user->uid);
-	$user_object->field_bookmarklet_code['und'][0]['value'] = bookmarklet_processor_generate_bookmarklet_code();
+	$user_object->field_bookmarklet_code['und'][0]['value'] = $code;
 	user_save($user_object);
 	return $code;
 }
@@ -33,32 +34,90 @@ function bookmarklet_processor_generate_bookmarklet_code() {
 // Sets up the user's unique bookmarklet code
 function bookmarklet_processor_user_insert(&$edit, $account, $category) {
 	$code = bookmarklet_processor_generate_bookmarklet_code();
-	dsm("Your bookmarklet code has been generated, and the bookmarklet is below.<br />
-		$code");
+	dsm("Your bookmarklet code has been generated, and the bookmarklet is below.");
 }
 
 // Allows user to recreate their unique code, in the event of abuse
 function bookmarklet_processor_user_recreate_code() {
 	$new_code = bookmarklet_processor_generate_bookmarklet_code();
-	dsm("Your new bookmarklet code has been generated, and the new bookmarklet is below.<br />
-		$new_code");
+	dsm("Your new bookmarklet code has been generated, and the new bookmarklet is below.");
+	drupal_goto('user');
+}
+
+// Create the bookmarklet block
+function bookmarklet_processor_block_info() {    
+  $blocks['bookmarklets'] = array(
+    // info: The name of the block.
+    'info' => t('Your Bookmarklets'),
+  );
+  return $blocks;
+}
+
+// Give the bookmarklet block content
+function bookmarklet_processor_block_view($delta = '') {
+  // The $delta parameter tells us which block is being requested.
+  switch ($delta) {
+    case 'bookmarklets':
+    	global $user;
+    	$user_object = user_load($user->uid);
+      $block['subject'] = t('Your Bookmarklets');
+      $favorite_link = "javascript:window.location='http://modulelog:8082/flag/favorite/" 
+      . $user_object->field_bookmarklet_code['und'][0]['value'] . "/'+document.URL;";
+      $review_link = "javascript:window.location='http://modulelog:8082/flag/mark-for-review/" 
+      . $user_object->field_bookmarklet_code['und'][0]['value'] . "/'+document.URL;";
+      $block['content'] = "Drag and drop these to your address bar, and you're all set!<p />
+      	<a href=" . $favorite_link . " target='_blank'>Favorite this Module</a> | 
+      	<a href=" . $review_link . " target='_blank'>Mark this Module for Review</a><p />
+      	You can also <a href='/user/recreate-code'>recreate your bookmarklet</a> with a new unique code, if you are concerned that it is being abused.
+      ";
+      break;
+  }
+
+  return $block;
 }
 
 // Request to add a module to a user's favorites
-function bookmarklet_processor_flag_favorite_process($user_code = null, $project_name = null) {
+function bookmarklet_processor_flag_favorite_process($code = null, $project_name = null) {
   bookmarklet_processor_module_node_exists($project_name);
-  return "The module <strong>$project_name</strong> has been added to your favorites.";
+  $user = user_load(bookmarklet_processor_get_uid_from_code($code));
+  $nid = bookmarklet_processor_get_nid_from_url_token($project_name);
+  if (!empty($user) && !empty($nid)) {
+    $flag = flag_get_flag('favorite');
+  	$flag->flag('flag', $nid, $user); 
+  	dsm("The module <strong>$project_name</strong> has been added to your favorites.");
+  	drupal_goto('modules/marked-for-review');
+  } else {
+  	return "There was an error processing your request.";
+  }
 }
 
 // Request to add a module to a user's review list
-function bookmarklet_processor_flag_mark_for_review_process($user_code = null, $project_name = null) {
+function bookmarklet_processor_flag_mark_for_review_process($code = null, $project_name = null) {
   bookmarklet_processor_module_node_exists($project_name);
-  return "The module <strong>$project_name</strong> has been added to your review list.";
+  $user = user_load(bookmarklet_processor_get_uid_from_code($code));
+  $nid = bookmarklet_processor_get_nid_from_url_token($project_name);
+  if (!empty($user) && !empty($nid)) {
+    $flag = flag_get_flag('mark_for_review');
+  	$flag->flag('flag', $nid, $user); 
+  	dsm("The module <strong>$project_name</strong> has been added to your review list.");
+  	drupal_goto('modules/favorites');
+  } else {
+  	return "There was an error processing your request.";
+  }
 }
 
-// Check for the module node and create it if it doesn't exist
+// Get user ID from unique code
+function bookmarklet_processor_get_uid_from_code($code) {
+	$result = db_select('field_revision_field_bookmarklet_code')
+     				->fields('field_revision_field_bookmarklet_code')
+     				->condition('field_bookmarklet_code_value',$code,'=')
+     				->execute()
+     				->fetchAssoc();
+  return $result['entity_id'];
+}
+
+// Check for the module node and create/scrape it if it doesn't exist
 function bookmarklet_processor_module_node_exists($project_name) {
-	$query = "SELECT * FROM `field_data_field_drupal_org_url_token` WHERE `field_drupal_org_url_token_value` = '$project_name'";
 	$result = db_select('field_data_field_drupal_org_url_token')
      				->fields('field_data_field_drupal_org_url_token')
      				->condition('field_drupal_org_url_token_value',$project_name,'=')
@@ -69,9 +128,17 @@ function bookmarklet_processor_module_node_exists($project_name) {
   }
 }
 
-function bookmarklet_processor_create_module_from_project_name($project_name) {
-	
+// Get nid of a node by it's module URL token
+function bookmarklet_processor_get_nid_from_url_token($project_name) {
+	$result = db_select('field_data_field_drupal_org_url_token')
+     				->fields('field_data_field_drupal_org_url_token')
+     				->condition('field_drupal_org_url_token_value',$project_name,'=')
+     				->execute()
+     				->fetchAssoc();
+  return $result['entity_id'];
+}
 
+function bookmarklet_processor_create_module_from_project_name($project_name) {
   $url = 'http://www.drupal.org/project/' . $project_name;
   // Overriding for development reasons
   //$url = 'http://localhost:8082/views.html';
